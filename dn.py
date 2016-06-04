@@ -1,9 +1,11 @@
 '''Directly login to DragonNest without webpage and plug-ins'''
 from __future__ import print_function
+import re
 import getpass
 import subprocess
 import webbrowser
 import ConfigParser
+import xml.etree.ElementTree as ET
 
 import requests
 from bs4 import BeautifulSoup
@@ -14,6 +16,8 @@ GAME_FOLDER_LOC = r'C:\Program Files (x86)\GF\DragonNest'
 LOGIN_URL = 'https://gf2.gameflier.com/game_zone/dn/dn_login.aspx'
 VCODE_URL = 'https://gf2.gameflier.com/VCode/spic.aspx?w=80&h=26'
 START_URL = 'http://gf2.gameflier.com/func/gameStart2.aspx?Game=dn'
+PATCH_CONFIG_URL = 'http://dnpatch.gameflier.com/PatchConfigList.xml'
+PATCH_URL = r'http:\\dnpatch.gameflier.com''\\'
 
 def encode_password(pass_str):
     '''encode the pass_str'''
@@ -54,7 +58,7 @@ def get_account_from_ini(ini_filename):
             else getpass.getpass("Password> ")
     }
 
-def dragonnest_get_token(account):
+def get_token(account):
     '''Get the token from the login page with the given account dict.'''
     session = requests.Session()
     start_res = session.get(LOGIN_URL)
@@ -114,19 +118,56 @@ def dragonnest_get_token(account):
     soup = BeautifulSoup(login_res.text, 'html.parser')
     return soup.select('input[name="token"]')[0]['value']
 
-def dragonnest_login(game_folder_loc, token):
+def get_patch_config():
+    '''Get ip, port from patch server, get ver from file'''
+    req = requests.get(PATCH_CONFIG_URL)
+    if req.status_code != requests.codes.ok:   #pylint: disable=no-member
+        print('Cannot get PatchConfigList.xml!')
+        print('Status Code: ' + req.status_code)
+        return
+    req.encoding = 'utf-8-sig'
+    xml = ET.XML(req.text)
+    xml = xml.find('./ChannelList/Local[@local_name]')
+    xml_ip = xml.findall('./login')
+    server_ip = xml_ip[0].get('addr') + ';' + xml_ip[1].get('addr')
+    port = xml_ip[0].get('port') + ';' + xml_ip[1].get('port')
+
+    ver_file = open(GAME_FOLDER_LOC + r'\Version.cfg', 'r')
+    ver = re.search('Version +([0-9]+)', ver_file.readline()).group(1)
+    ver_file.close()
+
+    return {'ip': server_ip, 'port': port, 'ver': ver}
+
+def login(token, patch_config):
     '''Open DragonNest with the given token string.'''
+    '''Open DNLauncher.exe
     subprocess.Popen(
-        [game_folder_loc + r'\dnlauncher.exe', token],
-        cwd=game_folder_loc
+        [GAME_FOLDER_LOC + r'\dnlauncher.exe', token],
+        cwd=GAME_FOLDER_LOC
+    )
+    '''
+    subprocess.Popen(
+        [
+            GAME_FOLDER_LOC + r'\DragonNest.exe',
+            '/logintoken:' + token,
+            '/ip:' + patch_config['ip'],
+            '/port:' + patch_config['port'],
+            '/Lver:2',
+            '/use_packing',
+            '/gamechanneling:0',
+            '/patchver:' + patch_config['ver'],
+            '/patchurl:' + PATCH_URL
+        ],
+        cwd=GAME_FOLDER_LOC
     )
 
 def main():
     '''Get account data, get token, and then login'''
     account = get_account_from_ini(INI_FILENAME)
-    token = dragonnest_get_token(account)
-    if token != None:
-        dragonnest_login(GAME_FOLDER_LOC, token)
+    token = get_token(account)
+    patch_config = get_patch_config()
+    if token != None and patch_config != {}:
+        login(token, patch_config)
 
 if __name__ == '__main__':
     main()
