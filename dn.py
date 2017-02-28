@@ -1,11 +1,13 @@
-'''Directly login to DragonNest without webpage and plug-ins'''
-from __future__ import print_function
+#! /usr/bin/python3
+"""Directly login to DragonNest without webpage and plug-ins"""
+
 import re
-import getpass
 import subprocess
 import webbrowser
-import ConfigParser
 import xml.etree.ElementTree as ET
+from codecs import decode, encode
+from configparser import ConfigParser
+from getpass import getpass
 
 import requests
 from bs4 import BeautifulSoup
@@ -13,39 +15,88 @@ from bs4 import BeautifulSoup
 INI_FILENAME = 'account.ini'
 VCODE_PNG_FILENAME = 'vcode.png'
 GAME_FOLDER_LOC = r'C:\Program Files (x86)\GF\DragonNest'
-LOGIN_URL = 'https://gf2.gameflier.com/game_zone/dn/dn_login.aspx'
-VCODE_URL = 'https://gf2.gameflier.com/VCode/spic.aspx?w=80&h=26'
-START_URL = 'http://gf2.gameflier.com/func/gameStart2.aspx?Game=dn'
-PATCH_CONFIG_URL = 'http://dnpatch.gameflier.com/PatchConfigList.xml'
+LOGIN_URL = r'https://gf2.gameflier.com/game_zone/dn/dn_login.aspx'
+VCODE_URL = r'https://gf2.gameflier.com/VCode/spic.aspx?w=80&h=26'
+START_URL = r'http://gf2.gameflier.com/func/gameStart2.aspx?Game=dn'
+
+PATCH_CONFIG_URL = r'http://dnpatch.gameflier.com/PatchConfigList.xml'
+"""The official login site redirect to non-HTTPS URL"""
+
 PATCH_URL = r'http:\\dnpatch.gameflier.com''\\'
+"""It is the orginal format used by launcher."""
 
-def encode_password(pass_str):
-    '''encode the pass_str'''
-    return pass_str.encode('base64').encode('rot13')
+def _check_account_name_format(account_name):
+    """ Check the input email account .
+        It should be validated as same as on the official login page. """
+    if not account_name:
+        return False
 
-def decode_password(pass_str):
-    '''decode the pass_str'''
-    return pass_str.decode('rot-13').decode('base64')
+    account_format = r'^([\w\-\.]+)' \
+                     r'@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.)|' \
+                     r'(([\w-]+\.)+))([a-zA-Z]{2,4}|' \
+                     r'[0-9]{1,3})(\]?)$'
+
+    return bool(re.match(account_format, account_name))
+
+def _check_password_format(password):
+    """ Check the input password.
+        It should be validated as same as on the official login page. """
+    if not password:
+        return False
+
+    # the length of the password should between 6 and 12
+    if not 6 <= len(password) <= 12:
+        return False
+
+    invalid_characters = r'[^a-z0-9A-Z]'
+
+    return not re.search(invalid_characters, password)
+
+def _get_account_name_from_input():
+    while True:
+        account_name = input("Email Account> ").strip()
+        if _check_account_name_format(account_name):
+            return account_name
+        else:
+            print('ERROR: Invalid email address.')
+
+def _get_password_from_input():
+    while True:
+        password = getpass("Password> ").strip()
+        if _check_password_format(password):
+            return password
+        else:
+            print('ERROR: Invalid password.')
+
+def _encode_password(pass_str):
+    """encode the pass_str"""
+    return encode(pass_str.encode(), 'base64').decode()
+
+def _decode_password(pass_str):
+    """decode the pass_str"""
+    return decode(pass_str.encode(), 'base64').decode()
 
 def get_account_from_ini(ini_filename):
-    '''Get account name and password from the ini file'''
-    account = ConfigParser.RawConfigParser()
+    """Get account name and password from the ini file"""
+    account = ConfigParser(interpolation=None)
     if not (account.read(ini_filename) and account.has_section('Account')):
-        user_account = raw_input("Account> ")
-        user_password = getpass.getpass("Password> ")
-        password_saved = raw_input("Save password?[Y/N]> ").lower() == 'y'
+        user_account = _get_account_name_from_input()
+        user_password = _get_password_from_input()
+        password_saved = input("Save password?[Y/N]> ").strip().lower() == 'y'
 
         account.add_section('Account')
         account.set('Account', 'user_account', user_account)
         account.set(
             'Account',
             'user_password',
-            encode_password(user_password)
+            _encode_password(user_password)
             if password_saved is True
             else ''
         )
-        account.set('Account', 'password_saved', password_saved)
-        account.write(open(ini_filename, 'wb'))
+        account.set('Account', 'password_saved', str(password_saved))
+
+        with open(ini_filename, 'w') as ini_file:
+            account.write(ini_file)
 
         return {'user_account': user_account,
                 'user_password': user_password}
@@ -53,13 +104,13 @@ def get_account_from_ini(ini_filename):
         'user_account':
             account.get('Account', 'user_account'),
         'user_password':
-            decode_password(account.get('Account', 'user_password'))
+            _decode_password(account.get('Account', 'user_password'))
             if account.getboolean('Account', 'password_saved') is True
-            else getpass.getpass("Password> ")
+            else _get_password_from_input()
     }
 
-def get_token(account):
-    '''Get the token from the login page with the given account dict.'''
+def get_login_token(account):
+    """Get the token from the login page with the given account dict."""
     session = requests.Session()
     start_res = session.get(LOGIN_URL)
 
@@ -76,11 +127,10 @@ def get_token(account):
     tbv_code = ''
     while tbv_code == '':
         vcode_res = session.get(VCODE_URL)
-        vcode_png_file = open(VCODE_PNG_FILENAME, 'wb')
-        vcode_png_file.write(vcode_res.content)
-        vcode_png_file.close()
+        with open(VCODE_PNG_FILENAME, 'wb') as vcode_png_file:
+            vcode_png_file.write(vcode_res.content)
         webbrowser.open(VCODE_PNG_FILENAME)
-        tbv_code = raw_input('vcode: ')
+        tbv_code = input('vcode: ').strip()
 
     params = {
         '__VIEWSTATE': view_state,
@@ -119,7 +169,7 @@ def get_token(account):
     return soup.select('input[name="token"]')[0]['value']
 
 def get_patch_config():
-    '''Get ip, port from patch server, get ver from file'''
+    """Get ip, port from patch server, get ver from file"""
     req = requests.get(PATCH_CONFIG_URL)
     if req.status_code != requests.codes.ok:   #pylint: disable=no-member
         print('Cannot get PatchConfigList.xml!')
@@ -132,20 +182,19 @@ def get_patch_config():
     server_ip = xml_ip[0].get('addr') + ';' + xml_ip[1].get('addr')
     port = xml_ip[0].get('port') + ';' + xml_ip[1].get('port')
 
-    ver_file = open(GAME_FOLDER_LOC + r'\Version.cfg', 'r')
-    ver = re.search('Version +([0-9]+)', ver_file.readline()).group(1)
-    ver_file.close()
+    with open(GAME_FOLDER_LOC + r'\Version.cfg', 'r') as ver_file:
+        ver = re.search('Version +([0-9]+)', ver_file.readline()).group(1)
 
     return {'ip': server_ip, 'port': port, 'ver': ver}
 
 def login(token, patch_config):
-    '''Open DragonNest with the given token string.'''
-    '''Open DNLauncher.exe
-    subprocess.Popen(
-        [GAME_FOLDER_LOC + r'\dnlauncher.exe', token],
-        cwd=GAME_FOLDER_LOC
-    )
-    '''
+    """Open DragonNest with the given token string."""
+    # Open DNLauncher.exe
+    # subprocess.Popen(
+    #     [GAME_FOLDER_LOC + r'\dnlauncher.exe', token],
+    #     cwd=GAME_FOLDER_LOC
+    # )
+
     subprocess.Popen(
         [
             GAME_FOLDER_LOC + r'\DragonNest.exe',
@@ -161,13 +210,24 @@ def login(token, patch_config):
         cwd=GAME_FOLDER_LOC
     )
 
+# def _test():
+#     """For test"""
+#     account_info = get_account_from_ini(INI_FILENAME)
+#     token = get_login_token(account_info)
+#     patch_config = get_patch_config()
+
+#     print(account_info)
+#     print(token)
+#     print(patch_config)
+
 def main():
-    '''Get account data, get token, and then login'''
-    account = get_account_from_ini(INI_FILENAME)
-    token = get_token(account)
+    """Get account data, get token, and then login"""
+    account_info = get_account_from_ini(INI_FILENAME)
+    token = get_login_token(account_info)
     patch_config = get_patch_config()
     if token != None and patch_config != {}:
         login(token, patch_config)
 
 if __name__ == '__main__':
     main()
+    # _test()
