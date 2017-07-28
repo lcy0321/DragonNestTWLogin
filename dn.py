@@ -1,5 +1,5 @@
 #! /usr/bin/python3
-"""Directly login to DragonNest without webpage and plug-ins"""
+"""Directly login to Dragon Nest Taiwan without the webpages and the plug-ins."""
 
 import re
 import subprocess

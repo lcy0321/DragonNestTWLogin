@@ -1,2 +1,2 @@
-# DragonNest_Login
-Directly login to DragonNest without webpage and plug-ins
+# DragonNestTWLogin
+Directly login to Dragon Nest Taiwan without the webpages and the plug-ins.
